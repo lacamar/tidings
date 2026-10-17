@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Tidings
+Comment=Read your feeds
+Exec=tidings %u
+MimeType=x-scheme-handler/feed;
+Icon=application-rss+xml
+Categories=Network;Feed;
+Keywords=RSS;Atom;News;Feed;
+StartupWMClass=dev.lacamar.Tidings
