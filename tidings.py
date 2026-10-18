@@ -480,6 +480,8 @@ class Backend(QObject):
     def patch(self, iid, **kv):
         self.db.execute(f'update items set {", ".join(f"{k} = ?" for k in kv)} where id = ?', (*kv.values(), iid))
         self.db.commit()
+        if kv.get('read'):
+            self.forget([iid])
         i = self.items.find(iid)
         if i is not None:
             self.items.rows[i].update(kv)
@@ -530,7 +532,6 @@ class Backend(QObject):
                             ' where i.id = ?', (iid,)).fetchone()
         if not r['read']:
             self.patch(iid, read=1)
-        self.withdraw(r['feed_id'])
         body, extra = r['content'], ''
         if r['full']:
             body, extra = r['full'], f'<div class="source">{r["content"]}</div>' if plain(r['content']) else ''
@@ -709,8 +710,16 @@ class Backend(QObject):
 
     def withdraw(self, fid, folder=''):
         gone = [r['id'] for r in self.feeds.rows if r['folder'] == folder] if folder else list(self.pending) if fid == 0 else [fid]
-        # ponytail: a partly-read group stays up with its old count; re-sending would pop it again
-        if [f for f in gone if self.pending.pop(f, None)] and not self.pending and self.note:
+        self.forget(i for f in gone for i in self.pending.get(f, []))
+
+    def forget(self, ids):
+        ids, n = set(ids), sum(map(len, self.pending.values()))
+        self.pending = {f: k for f, v in self.pending.items() if (k := [i for i in v if i not in ids])}
+        if not self.note or n == sum(map(len, self.pending.values())):
+            return
+        if self.pending:
+            self.notify()
+        else:
             self.call(NOTES, 'CloseNotification', 'u', (self.note,))
             self.note = 0
 
@@ -753,8 +762,7 @@ class Backend(QObject):
             return
         self.db.executemany('update items set read = 1 where id = ?', [(i,) for i in self.undo_ids])
         self.db.commit()
-        if not older_than:
-            self.withdraw(fid, folder)
+        self.forget(self.undo_ids)
         self.load_feeds()
         self.load_items()
         n = len(self.undo_ids)
