@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "tidings",
+  "project_id": "506c08c8-65a7-40c8-aa88-c38d1d56ac64"
+}
