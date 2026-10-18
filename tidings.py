@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import calendar, html, json, os, re, secrets, socket, sqlite3, subprocess, sys, threading, time, urllib.request
+import calendar, html, json, os, re, secrets, signal, socket, sqlite3, subprocess, sys, threading, time, urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -12,13 +12,14 @@ from jeepney import DBusAddress, HeaderFields, MatchRule, message_bus, new_metho
 from jeepney.io import blocking
 from jeepney.io.threading import DBusRouter, open_dbus_connection
 from jeepney.wrappers import unwrap_msg
-from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QAbstractListModel, QModelIndex, QFileSystemWatcher, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QAbstractListModel, QModelIndex, QFileSystemWatcher, QObject, QSocketNotifier, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
-from PySide6.QtWebEngineQuick import QtWebEngineQuick
+from PySide6.QtWebEngineCore import QWebEngineUrlRequestInfo, QWebEngineUrlRequestInterceptor
+from PySide6.QtWebEngineQuick import QQuickWebEngineProfile, QtWebEngineQuick
 
 APP_ID = 'dev.lacamar.Tidings'
 UA = 'Mozilla/5.0 (X11; Linux) Tidings/0.1'
@@ -27,6 +28,8 @@ LIMIT = 300
 KEEP_DAYS = 60
 WANTS = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'systemd/user/graphical-session.target.wants/tidings.service')
 
+LISTS = ('https://easylist.to/easylist/easylist.txt', 'https://easylist.to/easylist/easyprivacy.txt',
+         'https://secure.fanboy.co.nz/fanboy-cookiemonster.txt')
 THEME = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'tidings/theme.json')
 PALETTE = {False: dict(bg='#ffffff', side='#f4f4f6', raised='#ffffff', fg='#1b1b20', sub='#6c6c76', line='#e6e6ea'),
            True: dict(bg='#1c1c1f', side='#151517', raised='#2a2a2e', fg='#f2f2f4', sub='#9d9da6', line='#2b2b30')}
@@ -295,6 +298,67 @@ PORTAL = DBusAddress('/org/freedesktop/portal/desktop', 'org.freedesktop.portal.
 FILES = DBusAddress(PORTAL.object_path, PORTAL.bus_name, 'org.freedesktop.portal.FileChooser')
 
 
+HOST_RULE = re.compile(r'(@@)?\|\|([a-z0-9.-]+)\^(?:\$([a-z,-]+))?')
+HOST_OPTS = {'third-party', '3p', 'script', 'image', 'xmlhttprequest', 'subdocument', 'ping', 'media', 'websocket', 'other'}
+PATH_RULE = re.compile(r'/[\w./-]+\|?')
+COSMETIC = re.compile(r'([a-z0-9.,-]*)##(.+)')
+NAV_TRACKING = re.compile(r'utm_|fbclid=|gclid=|mc_[ce]id=')
+
+
+def parse_lists(texts):
+    hosts, allow, paths, css = {'content-settings.com'}, set(), [], {'': ''}  # ponytail: Ad-Shield anti-adblock config host, missing from lists
+    for i, text in enumerate(texts):
+        cookies = i == len(texts) - 1
+        for line in text.splitlines():
+            if (m := HOST_RULE.fullmatch(line)) and (not m[3] or set(m[3].split(',')) <= HOST_OPTS):
+                (allow if m[1] else hosts).add(m[2])
+            elif (m := COSMETIC.fullmatch(line)) and (cookies or not m[1]):
+                for d in m[1].split(','):
+                    css[d] = css.get(d, '') + m[2] + '{display:none!important}'
+            elif cookies and PATH_RULE.fullmatch(line):
+                paths.append(re.escape(line.rstrip('|')))
+    return hosts, allow, re.compile('|'.join(paths)) if paths else None, css
+
+
+class Blocker(QWebEngineUrlRequestInterceptor):
+    hosts = allow = frozenset()
+    paths = None
+
+    def load(self, folder):
+        texts = []
+        for url in LISTS:
+            path = os.path.join(folder, os.path.basename(url))
+            try:
+                if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 4 * 86400:
+                    data = get(url)[1]
+                    with open(path, 'wb') as f:
+                        f.write(data)
+                with open(path, encoding='utf-8', errors='replace') as f:
+                    texts.append(f.read())
+            except OSError as e:
+                print(f'blocklist {url}: {e}', file=sys.stderr)
+                texts.append('')
+        self.hosts, self.allow, self.paths, css = parse_lists(texts)
+        return ('(() => { const m = %s, h = location.hostname.split("."), s = new CSSStyleSheet(); let c = m[""]'
+                '; for (let i = 0; i < h.length - 1; i++) c += m[h.slice(i).join(".")] || ""'
+                '; s.replaceSync(c); document.adoptedStyleSheets = [...document.adoptedStyleSheets, s] })()') % json.dumps(css)
+
+    def interceptRequest(self, info):
+        info.setHttpHeader(b'Sec-GPC', b'1')
+        info.setHttpHeader(b'DNT', b'1')
+        url = info.requestUrl()
+        if info.resourceType() == QWebEngineUrlRequestInfo.ResourceType.ResourceTypeMainFrame:
+            q = url.query(QUrl.FullyEncoded).split('&')
+            if any(NAV_TRACKING.match(kv) for kv in q):
+                url.setQuery('&'.join(kv for kv in q if not NAV_TRACKING.match(kv)) or None)
+                info.redirect(url)
+            return
+        p = url.host().split('.')
+        ds = {'.'.join(p[i:]) for i in range(len(p) - 1)}
+        if not ds & self.allow and (ds & self.hosts or self.paths and self.paths.search(url.path(QUrl.FullyEncoded))):
+            info.block(True)
+
+
 class Rows(QAbstractListModel):
     def __init__(self, keys):
         super().__init__()
@@ -349,6 +413,8 @@ class Backend(QObject):
     _discovered = Signal(object)
     _extracted = Signal(int, object)
     _iconed = Signal(int, object)
+    _blocked = Signal(object)
+    cosmeticChanged = Signal()
     _dbus = Signal(object)
 
     def __init__(self, db, cache):
@@ -377,6 +443,9 @@ class Backend(QObject):
         self._extracted.connect(self.extracted)
         self._iconed.connect(self.iconed)
         self._dbus.connect(self.on_dbus)
+        self.blocker, self.cosmetic_js = Blocker(self), ''
+        self._blocked.connect(self.blocked)
+        self.pool.submit(self.blocker.load, os.path.dirname(cache)).add_done_callback(self._blocked.emit)
         self.bus = DBusRouter(open_dbus_connection())
         q = Queue()
         for rule in (MatchRule(type='signal', interface=NOTES.interface),
@@ -729,6 +798,15 @@ class Backend(QObject):
         except Exception as e:
             print(f'icon {fid}: {e}', file=sys.stderr)
 
+    def blocked(self, fut):
+        try:
+            self.cosmetic_js = fut.result()
+            self.cosmeticChanged.emit()
+        except Exception as e:
+            print(f'blocklists: {e}', file=sys.stderr)
+
+    cosmetic = Property(str, lambda s: s.cosmetic_js, notify=cosmeticChanged)
+
     @Slot(int, bool)
     def setRead(self, iid, on):
         self.patch(iid, read=int(on))
@@ -977,6 +1055,14 @@ def main():
     os.makedirs(cache, exist_ok=True)
     backend = Backend(open_db(os.path.join(data, 'tidings.db')), cache)
     QQuickWindow.setDefaultAlphaBuffer(True)
+    profile = QQuickWebEngineProfile.defaultProfile()
+    profile.setUrlRequestInterceptor(backend.blocker)
+    profile.cookieStore().setCookieFilter(lambda r: not r.thirdParty)
+    rfd, wfd = socket.socketpair()
+    wfd.setblocking(False)
+    signal.set_wakeup_fd(wfd.fileno())
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    wake = QSocketNotifier(rfd.fileno(), QSocketNotifier.Read, app, activated=lambda: rfd.recv(64))
     engine = QQmlApplicationEngine()
     engine.setInitialProperties({'app': backend, 'visible': '--background' not in sys.argv})
     engine.load(QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Main.qml')))

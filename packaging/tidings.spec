@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -54,6 +54,14 @@ python3 test_tidings.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Mon Oct 19 2026 Lachlan <lchlnm@pm.me> - 0.2.2-1
+- Block ads and trackers in web viewer
+- Block third-party cookies
+- Hide cookie banners
+- Send GPC/DNT headers
+- Strip tracking params from links
+- Save settings on SIGTERM
+
 * Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.1-1
 - Follow system dark mode in web pages
 - Add forced dark mode for web pages

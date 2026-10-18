@@ -892,6 +892,7 @@ ApplicationWindow {
                 }
                 settings.fullScreenSupportEnabled: true
                 settings.forceDarkMode: win.dark && prefs.forceDark
+                userScripts.collection: app.cosmetic ? [{ name: "cosmetic", sourceCode: app.cosmetic, injectionPoint: WebEngineScript.DocumentCreation, worldId: WebEngineScript.ApplicationWorld }] : []
                 onFullScreenRequested: req => {
                     req.accept()
                     if (req.toggleOn) wasVisibility = win.visibility
