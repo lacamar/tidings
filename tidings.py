@@ -70,15 +70,33 @@ def open_db(path):
             guid text, title text, link text, author text, published integer, content text, image text,
             read integer default 0, unique(feed_id, guid));
         create index if not exists items_published on items(published);
+        create table if not exists mutes(id integer primary key, text text, feed_id integer references feeds on delete cascade,
+            title_only integer, expires integer);
     ''')
     for table, col in (('feeds', 'site text'), ('feeds', 'icon text'), ('feeds', 'name text'), ('feeds', 'error text'),
                        ('feeds', 'notify integer default 1'), ('items', 'full text'), ('items', 'starred integer default 0'),
-                       ('items', 'media text'), ('items', 'media_type text'), ('feeds', 'folder text'), ('items', 'pos real'), ('feeds', 'fulltext integer default 0')):
+                       ('items', 'media text'), ('items', 'media_type text'), ('feeds', 'folder text'), ('items', 'pos real'), ('feeds', 'fulltext integer default 0'),
+                       ('items', 'nlink text'), ('items', 'dup integer'), ('items', 'muted integer default 0')):
         try:
             db.execute(f'alter table {table} add column {col}')
         except sqlite3.OperationalError:
             pass
+    db.execute('create index if not exists items_nlink on items(nlink)')
+    db.create_function('muted', 3, lambda *a: 0)
+    db.create_function('norm_link', 1, norm_link)
+    db.execute('update items set nlink = norm_link(link) where nlink is null and link is not null')
     return db
+
+
+TRACKING = re.compile(r'utm_|fbclid$|gclid$|mc_|ref$|source$')
+
+
+def norm_link(url):
+    p = urlparse(url or '')
+    if p.path.strip('/') == '':
+        return None
+    q = '&'.join(kv for kv in p.query.split('&') if kv and not TRACKING.match(kv.split('=')[0]))
+    return p.netloc.lower().removeprefix('www.') + p.path.rstrip('/') + (q and '?' + q)
 
 
 def image_of(e, content):
@@ -120,7 +138,12 @@ def store(db, feed_id, d):
                         e.get('link'), e.get('author'), calendar.timegm(t) if t else int(time.time()), content,
                         image_of(e, content), *media_of(e)))
         if c.rowcount:
-            new.append(c.lastrowid)
+            i, nl, title, pub = c.lastrowid, norm_link(e.get('link')), e.get('title') or '', calendar.timegm(t) if t else int(time.time())
+            # ponytail: exact link or 4+-word title within 3 days; fuzzy title match if near-dupes slip through
+            dup = db.execute('select id from items where id != ? and (nlink = ? or (? and title = ? collate nocase and abs(published - ?) < 259200))'
+                             ' order by id limit 1', (i, nl, len(title.split()) >= 4, title, pub)).fetchone()
+            db.execute('update items set nlink = ?, dup = ?, muted = muted(feed_id, title, content) where id = ?', (nl, dup and dup[0], i))
+            new.append(i)
     db.commit()
     return new
 
@@ -312,6 +335,7 @@ class Rows(QAbstractListModel):
 
 class Backend(QObject):
     changed = Signal()
+    mutesChanged = Signal()
     themeChanged = Signal()
     busyChanged = Signal()
     message = Signal(str, bool)
@@ -330,7 +354,7 @@ class Backend(QObject):
         super().__init__()
         self.db, self.cache, self.pool, self.win = db, cache, ThreadPoolExecutor(8), None
         self.feeds = Rows(('id', 'title', 'unread', 'web', 'icon', 'error', 'notify', 'url', 'site', 'folder', 'full'))
-        self.items = Rows(('id', 'feed_id', 'title', 'feed', 'preview', 'image', 'when', 'day', 'read', 'starred', 'link', 'web', 'media'))
+        self.items = Rows(('id', 'feed_id', 'title', 'feed', 'preview', 'image', 'when', 'day', 'read', 'starred', 'link', 'web', 'media', 'hidden'))
         self._feed = self.current = 0
         self._folder, self._folders = '', {}
         self._unread, self._query = False, ''
@@ -343,6 +367,9 @@ class Backend(QObject):
         self.pending, self.note, self.fresh, self.requests = {}, 0, False, {}
         self.inflight, self.extracting, self.iconing, self.undo_ids = set(), set(), set(), []
         self.asked, self.limit = 0, LIMIT
+        self._hidden, self._calm, self._expire, self.hidden_n, self.rules = False, False, 0, 0, []
+        db.create_function('muted', 3, self.muted)
+        self.load_mutes(True)
         self.reload = QTimer(self, singleShot=True, interval=300, timeout=self.load_items)
         self._fetched.connect(self.fetched)
         self._discovered.connect(self.discovered)
@@ -392,6 +419,62 @@ class Backend(QObject):
 
     def palette(self):
         return {**PALETTE[self._dark], 'accent': self._accent.name(), 'opacity': 0.7, **self.custom}
+
+    def muted(self, fid, title, content):
+        return int(any((f is None or f == fid) and (rx.search(title or '') or not t and rx.search(content or ''))
+                       for f, t, rx in self.rules))
+
+    def load_mutes(self, force=False):
+        if self.db.execute('delete from mutes where expires < ?', (time.time(),)).rowcount or force:
+            rows = self.db.execute('select m.*, coalesce(f.name, f.title, f.url) as feed from mutes m left join feeds f on f.id = m.feed_id'
+                                   ' order by m.id').fetchall()
+            self._mutes = [dict(id=r['id'], text=r['text'], feed=r['feed'] or '', titleOnly=bool(r['title_only']),
+                                expires=QLocale().toString(QDateTime.fromSecsSinceEpoch(r['expires']).date(), QLocale.ShortFormat)
+                                if r['expires'] else '') for r in rows]
+            self.rules = [(r['feed_id'], r['title_only'], re.compile(
+                r'(?<!\w)(?:' + '|'.join(re.escape(w.strip()) for w in r['text'].split(',') if w.strip()) + r')(?!\w)', re.I))
+                for r in rows]
+            self.db.execute('update items set muted = muted(feed_id, title, content)')
+            self.db.commit()
+            self.mutesChanged.emit()
+            return True
+
+    @Slot(str, int, bool, int)
+    def addMute(self, text, fid, title_only, days):
+        if text.strip(' ,'):
+            self.db.execute('insert into mutes(text, feed_id, title_only, expires) values(?, ?, ?, ?)',
+                            (text.strip(), fid if fid > 0 else None, int(title_only), days and int(time.time()) + days * 86400 or None))
+            self.refilter()
+
+    @Slot(int)
+    def removeMute(self, mid):
+        self.db.execute('delete from mutes where id = ?', (mid,))
+        self.refilter()
+
+    def refilter(self):
+        self.load_mutes(True)
+        self.load_feeds()
+        self.load_items()
+
+    def expire_old(self):
+        if self._expire:
+            self.db.execute('update items set read = 1 where not read and not starred and published < ?', (time.time() - self._expire * 86400,))
+            self.db.commit()
+
+    def set_expire(self, days):
+        self._expire = days
+        self.expire_old()
+        self.load_feeds()
+        self.load_items()
+
+    def set_hidden(self, on):
+        self._hidden = on
+        self.load_items()
+        self.changed.emit()
+
+    def set_calm(self, on):
+        self._calm = on
+        self.changed.emit()
 
     def on_dbus(self, m):
         name, args = m.header.fields[HeaderFields.member], m.body
@@ -453,6 +536,11 @@ class Backend(QObject):
     query = Property(str, lambda s: s._query, set_query, notify=changed)
     folder = Property(str, lambda s: s._folder, lambda s, v: s.set_feed(0, v), notify=changed)
     folders = Property('QVariant', lambda s: s._folders, notify=changed)
+    showHidden = Property(bool, lambda s: s._hidden, set_hidden, notify=changed)
+    hiddenCount = Property(int, lambda s: s.hidden_n, notify=changed)
+    calm = Property(bool, lambda s: s._calm, set_calm, notify=changed)
+    expireDays = Property(int, lambda s: s._expire, set_expire, notify=changed)
+    mutes = Property('QVariant', lambda s: s._mutes, notify=mutesChanged)
     feedTitle = Property(str, lambda s: s._folder or next((r['title'] for r in s.feeds.rows if r['id'] == s._feed), ''), notify=changed)
 
     def scope(self, fid, folder=''):
@@ -461,7 +549,7 @@ class Backend(QObject):
         return ('starred', ()) if fid == -1 else ('feed_id = ?', (fid,)) if fid else ('1', ())
 
     def load_feeds(self):
-        counts = dict(self.db.execute('select feed_id, count(*) from items where not read group by feed_id').fetchall())
+        counts = dict(self.db.execute('select feed_id, count(*) from items where not read and dup is null and not muted group by feed_id').fetchall())
         saved = self.db.execute('select count(*) from items where starred').fetchone()[0]
         blank = dict(web=0, icon='', error='', notify=1, url='', site='', folder='', full=0)
         self.feeds.set([dict(blank, id=0, title='All Articles', unread=sum(counts.values())),
@@ -483,19 +571,26 @@ class Backend(QObject):
         if reset:
             self.limit = LIMIT
         w, args = self.scope(self._feed, self._folder)
-        q = ("select i.id, i.feed_id, i.title, i.link, i.published, i.image, i.read, i.starred, f.web, i.media_type,"
-             " coalesce(f.name, f.title) as feed_title, substr(coalesce(nullif(i.full, ''), i.content), 1, 3000) as body"
-             f" from items i join feeds f on f.id = i.feed_id where {w}")
         args = list(args)
         if self._unread:
-            q, args = q + ' and (not read or i.id = ?)', args + [self.current]
+            w, args = w + ' and (not read or i.id = ?)', args + [self.current]
         if self._query:
-            q, args = q + ' and (i.title like ? or i.content like ? or i.full like ?)', args + [f'%{self._query}%'] * 3
+            w, args = w + ' and (i.title like ? or i.content like ? or i.full like ?)', args + [f'%{self._query}%'] * 3
+        hide = '(i.dup is not null or i.muted)'
+        n = 0 if self._feed == -1 else self.db.execute(f'select count(*) from items i where {w} and {hide}', args).fetchone()[0]
+        if self._feed != -1 and not self._hidden:
+            w += f' and not {hide}'
+        q = ("select i.id, i.feed_id, i.title, i.link, i.published, i.image, i.read, i.starred, f.web, i.media_type,"
+             f" {hide} as hidden, coalesce(f.name, f.title) as feed_title, substr(coalesce(nullif(i.full, ''), i.content), 1, 3000) as body"
+             f" from items i join feeds f on f.id = i.feed_id where {w}")
         self.items.set([dict(id=r['id'], feed_id=r['feed_id'], title=plain(r['title']), feed=r['feed_title'] or '',
                              preview=plain(r['body'])[:300], image=r['image'] or '', when=when(r['published']),
                              day=day(r['published']), read=r['read'], starred=r['starred'], link=r['link'] or '', web=r['web'],
-                             media=r['media_type'] or '')
+                             media=r['media_type'] or '', hidden=bool(r['hidden']))
                         for r in self.db.execute(q + ' order by published desc, i.id desc limit ?', args + [self.limit])], reset)
+        if n != self.hidden_n:
+            self.hidden_n = n
+            self.changed.emit()
 
     def patch(self, iid, **kv):
         self.db.execute(f'update items set {", ".join(f"{k} = ?" for k in kv)} where id = ?', (*kv.values(), iid))
@@ -709,6 +804,8 @@ class Backend(QObject):
             self.pending.setdefault(f['id'], [])[:0] = new
             self.fresh = True
         if not self.inflight:
+            self.load_mutes()
+            self.expire_old()
             self.db.execute('delete from items where read and not starred and published < ?', (time.time() - KEEP_DAYS * 86400,))
             self.db.commit()
             self.busyChanged.emit()
@@ -722,7 +819,7 @@ class Backend(QObject):
     def notify(self):
         ids = [i for v in self.pending.values() for i in v]
         rows = self.db.execute(f'select i.title, coalesce(f.name, f.title, f.url) from items i join feeds f on f.id = i.feed_id'
-                               f' where i.id in ({",".join("?" * len(ids))}) order by i.published desc', ids).fetchall()
+                               f' where i.dup is null and not i.muted and i.id in ({",".join("?" * len(ids))}) order by i.published desc', ids).fetchall()
         if rows:
             head, body = summary([tuple(r) for r in rows])
             self.note = self.call(NOTES, 'Notify', 'susssasa{sv}i', (
@@ -899,7 +996,7 @@ def main():
         menu.addAction('Quit', app.quit)
         tray.setContextMenu(menu)
         tray.activated.connect(lambda why: why == QSystemTrayIcon.Trigger and backend.shown.emit())
-        backend.changed.connect(lambda: tray.setToolTip(f"Tidings — {backend.feeds.rows[0]['unread']} unread"))
+        backend.changed.connect(lambda: tray.setToolTip('Tidings' if backend.calm else f"Tidings — {backend.feeds.rows[0]['unread']} unread"))
         backend.changed.emit()
         tray.show()
     QTimer.singleShot(1000, backend.refresh)

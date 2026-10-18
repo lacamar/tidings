@@ -109,6 +109,8 @@ ApplicationWindow {
         property string folder
         property bool unreadOnly
         property bool serif
+        property bool calm
+        property int expireDays
         property alias width: win.width
         property alias height: win.height
         property alias sideWanted: win.sideWanted
@@ -118,6 +120,8 @@ ApplicationWindow {
     Component.onCompleted: {
         const p = [prefs.unreadOnly, prefs.folder, prefs.feedId]
         app.setSerif(prefs.serif)
+        app.calm = prefs.calm
+        app.expireDays = prefs.expireDays
         app.unreadOnly = p[0]
         if (p[1]) app.folder = p[1]
         else app.feedId = p[2]
@@ -183,7 +187,7 @@ ApplicationWindow {
     QtObject {
         id: keys
         readonly property bool ok: !search.activeFocus && !(win.cur && win.cur.web) && !addDialog.visible
-                                   && !renameDialog.visible && !removeDialog.visible && !helpDialog.visible && !folderDialog.visible
+                                   && !renameDialog.visible && !removeDialog.visible && !helpDialog.visible && !folderDialog.visible && !muteDialog.visible
     }
 
     component IconButton: ToolButton {
@@ -451,7 +455,7 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: app.folders[head.section] || ""
-                                    visible: head.shut && text
+                                    visible: head.shut && text && !app.calm
                                     color: win.sub
                                     font.pixelSize: 12
                                     font.features: { "tnum": 1 }
@@ -508,7 +512,7 @@ ApplicationWindow {
                                 }
                                 Label {
                                     text: feedRow.model.unread
-                                    visible: feedRow.model.unread > 0
+                                    visible: feedRow.model.unread > 0 && !app.calm
                                     color: win.sub
                                     font.pixelSize: 12
                                     font.features: { "tnum": 1 }
@@ -639,6 +643,7 @@ ApplicationWindow {
                         readonly property bool hasThumb: thumb.status === Image.Ready && thumb.implicitWidth >= 40
                         width: ListView.view.width
                         height: Math.max(text.implicitHeight, hasThumb ? 64 : 0) + 26
+                        opacity: row.model.hidden ? 0.45 : 1
 
                         Rectangle {
                             anchors.fill: parent
@@ -732,7 +737,7 @@ ApplicationWindow {
 
                     Placeholder {
                         anchors.centerIn: parent
-                        visible: itemsView.count === 0
+                        visible: itemsView.count === 0 && !app.hiddenCount
                         icon: app.query ? "edit-find" : app.feedId === -1 ? "non-starred-symbolic"
                             : feedsView.count > 2 ? "checkmark" : "application-rss+xml"
                         text: app.query ? "No Results" : app.feedId === -1 ? "Nothing Saved"
@@ -747,6 +752,23 @@ ApplicationWindow {
                             onClicked: addDialog.openWith("", false)
                         }
                     }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: win.line; visible: hiddenBar.visible }
+                ItemDelegate {
+                    id: hiddenBar
+                    Layout.fillWidth: true
+                    visible: app.hiddenCount > 0
+                    implicitHeight: 38
+                    background: Rectangle { color: hiddenBar.hovered ? win.hover : "transparent" }
+                    contentItem: Label {
+                        text: (app.showHidden ? "Hide " : "Show ") + app.hiddenCount + " duplicate or muted article" + (app.hiddenCount === 1 ? "" : "s")
+                        color: win.sub
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    onClicked: app.showHidden = !app.showHidden
                 }
             }
         }
@@ -928,6 +950,27 @@ ApplicationWindow {
             onTriggered: { prefs.serif = checked; app.setSerif(checked) }
         }
         Entry {
+            text: "Calm Mode (Hide Counts)"
+            checkable: true
+            checked: prefs.calm
+            onTriggered: { prefs.calm = checked; app.calm = checked }
+        }
+        Pop {
+            title: "Auto-Mark Unread as Read"
+            Repeater {
+                model: [[0, "Never"], [3, "After 3 Days"], [7, "After a Week"], [14, "After 2 Weeks"], [30, "After a Month"]]
+                Entry {
+                    required property var modelData
+                    text: modelData[1]
+                    checkable: true
+                    checked: app.expireDays === modelData[0]
+                    onTriggered: { prefs.expireDays = modelData[0]; app.expireDays = modelData[0] }
+                }
+            }
+        }
+        Entry { text: "Mute Filters…"; onTriggered: muteDialog.openFor("", {}) }
+        Sep {}
+        Entry {
             text: "Run in Background at Login"
             checkable: true
             checked: app.autostart
@@ -963,6 +1006,7 @@ ApplicationWindow {
             checked: !!feedMenu.feed.full
             onTriggered: app.setFull(feedMenu.feed.id, checked)
         }
+        Entry { text: "Mute Keyword…"; onTriggered: muteDialog.openFor("", feedMenu.feed) }
         Entry { text: "Mark All as Read"; onTriggered: app.markAllRead(feedMenu.feed.id, "") }
         Sep {}
         Entry { text: "Remove Feed…"; onTriggered: removeDialog.openFor(feedMenu.feed) }
@@ -981,6 +1025,7 @@ ApplicationWindow {
         id: readerMenu
         property var at: ({})
         Entry { text: "Copy"; visible: !!readerMenu.at.text; onTriggered: reader.triggerWebAction(WebEngineView.Copy) }
+        Entry { text: "Mute “" + (readerMenu.at.text || "").trim().slice(0, 24) + "”…"; visible: !!readerMenu.at.text && readerMenu.at.text.length < 60; onTriggered: muteDialog.openFor(readerMenu.at.text.trim(), {}) }
         Entry { text: "Open Link"; visible: !!readerMenu.at.link; onTriggered: Qt.openUrlExternally(readerMenu.at.link) }
         Entry { text: "Copy Link"; visible: !!readerMenu.at.link; onTriggered: app.copy(readerMenu.at.link) }
         Entry { text: "Open Image"; visible: !!readerMenu.at.image; onTriggered: Qt.openUrlExternally(readerMenu.at.image) }
@@ -1144,6 +1189,78 @@ ApplicationWindow {
                     enabled: folderName.text.trim() || !folderDialog.renaming
                     onClicked: folderDialog.submit(folderName.text)
                 }
+            }
+        }
+    }
+
+    Sheet {
+        id: muteDialog
+        property var feed: ({})
+        property bool titleOnly
+        property bool feedOnly
+        property int days
+        function openFor(t, f) { word.text = t; feed = f; feedOnly = !!f.id; titleOnly = false; days = 0; open() }
+        function submit() { app.addMute(word.text, feedOnly ? feed.id : 0, titleOnly, days); word.text = "" }
+        onOpened: word.forceActiveFocus()
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 14
+            Label { text: "Mute Filters"; font.pixelSize: 18; font.weight: Font.Bold }
+            Label {
+                Layout.fillWidth: true
+                text: "Hide articles containing a word or phrase. Separate alternatives with commas."
+                color: win.sub
+                wrapMode: Text.Wrap
+            }
+            Field { id: word; Layout.fillWidth: true; placeholderText: "e.g. sponsored, giveaway"; onAccepted: muteDialog.submit() }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                PillButton { implicitHeight: 30; text: "Titles Only"; primary: muteDialog.titleOnly; onClicked: muteDialog.titleOnly = !muteDialog.titleOnly }
+                PillButton {
+                    implicitHeight: 30
+                    visible: !!muteDialog.feed.id
+                    text: "Only " + muteDialog.feed.title
+                    primary: muteDialog.feedOnly
+                    onClicked: muteDialog.feedOnly = !muteDialog.feedOnly
+                }
+                Repeater {
+                    model: [[0, "Forever"], [1, "1 Day"], [7, "1 Week"], [30, "1 Month"]]
+                    PillButton {
+                        required property var modelData
+                        implicitHeight: 30
+                        text: modelData[1]
+                        primary: muteDialog.days === modelData[0]
+                        onClicked: muteDialog.days = modelData[0]
+                    }
+                }
+            }
+            Repeater {
+                model: app.mutes
+                RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Label { Layout.fillWidth: true; text: modelData.text; elide: Text.ElideRight }
+                        Label {
+                            Layout.fillWidth: true
+                            text: [modelData.feed || "All feeds", modelData.titleOnly ? "titles" : "",
+                                   modelData.expires ? "until " + modelData.expires : ""].filter(x => x).join(" · ")
+                            color: win.sub
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                        }
+                    }
+                    IconButton { tip: "Remove"; icon.name: "edit-delete"; icon.color: win.sub; onClicked: app.removeMute(modelData.id) }
+                }
+            }
+            RowLayout {
+                Layout.topMargin: 4
+                Item { Layout.fillWidth: true }
+                PillButton { text: "Done"; onClicked: muteDialog.close() }
+                PillButton { primary: true; text: "Mute"; enabled: word.text.trim(); onClicked: muteDialog.submit() }
             }
         }
     }
