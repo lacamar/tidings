@@ -54,7 +54,7 @@ python3 test_tidings.py
 %systemd_user_preun tidings.service
 
 %changelog
-* Mon Oct 19 2026 Lachlan <lchlnm@pm.me> - 0.2.2-1
+* Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.2-1
 - Block ads and trackers in web viewer
 - Block third-party cookies
 - Hide cookie banners
