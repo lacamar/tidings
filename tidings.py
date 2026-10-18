@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import calendar, html, os, re, secrets, socket, sqlite3, sys, threading, time, urllib.request
+import calendar, html, os, re, secrets, socket, sqlite3, subprocess, sys, threading, time, urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -23,7 +23,7 @@ UA = 'Mozilla/5.0 (X11; Linux) Tidings/0.1'
 REFRESH_SECS = 30 * 60
 LIMIT = 300
 KEEP_DAYS = 60
-AUTOSTART = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'autostart', APP_ID + '.desktop')
+WANTS = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'systemd/user/graphical-session.target.wants/tidings.service')
 
 socket.setdefaulttimeout(20)
 feedparser.USER_AGENT = UA
@@ -769,16 +769,10 @@ class Backend(QObject):
         self.load_items()
 
     def set_autostart(self, on):
-        if on:
-            os.makedirs(os.path.dirname(AUTOSTART), exist_ok=True)
-            with open(AUTOSTART, 'w') as f:
-                f.write(f'[Desktop Entry]\nType=Application\nName=Tidings\nIcon=application-rss+xml\n'
-                        f'Exec="{os.path.realpath(__file__)}" --background\n')
-        elif os.path.exists(AUTOSTART):
-            os.remove(AUTOSTART)
+        subprocess.run(['systemctl', '--user', 'enable' if on else 'disable', 'tidings.service'], check=False)
         self.changed.emit()
 
-    autostart = Property(bool, lambda s: os.path.exists(AUTOSTART), set_autostart, notify=changed)
+    autostart = Property(bool, lambda s: os.path.lexists(WANTS), set_autostart, notify=changed)
 
     @Slot(result=str)
     def clipboardUrl(self):

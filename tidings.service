@@ -1,0 +1,11 @@
+[Unit]
+Description=Tidings feed reader
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/tidings --background
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
