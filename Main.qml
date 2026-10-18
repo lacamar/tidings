@@ -12,13 +12,15 @@ ApplicationWindow {
     property bool sideWanted: true
     readonly property bool showSide: sideWanted && width >= 760
     readonly property bool dark: app.dark
-    readonly property color accent: app.accent
-    readonly property color bg: dark ? "#1c1c1f" : "#ffffff"
-    readonly property color side: dark ? "#151517" : "#f4f4f6"
-    readonly property color raised: dark ? "#2a2a2e" : "#ffffff"
-    readonly property color fg: dark ? "#f2f2f4" : "#1b1b20"
-    readonly property color sub: dark ? "#9d9da6" : "#6c6c76"
-    readonly property color line: dark ? "#2b2b30" : "#e6e6ea"
+    readonly property color accent: app.theme.accent
+    readonly property color solid: app.theme.bg
+    readonly property color bg: tint(solid, app.theme.opacity)
+    readonly property color sideSolid: app.theme.side
+    readonly property color side: tint(sideSolid, app.theme.opacity)
+    readonly property color raised: app.theme.raised
+    readonly property color fg: app.theme.fg
+    readonly property color sub: app.theme.sub
+    readonly property color line: app.theme.line
     readonly property color hover: tint(fg, 0.05)
     readonly property color selected: tint(accent, dark ? 0.24 : 0.13)
     readonly property color gold: "#e5a50a"
@@ -81,7 +83,8 @@ ApplicationWindow {
     function applyTheme() {
         if (cur && !cur.web)
             reader.runJavaScript(`document.documentElement.className='${dark ? "dark" : ""}';`
-                                 + `document.documentElement.style.setProperty('--accent','${accent}')`)
+                                 + `document.documentElement.style.setProperty('--accent','${accent}');`
+                                 + `document.documentElement.style.setProperty('--fg','${fg}')`)
     }
 
     width: 1280
@@ -89,12 +92,12 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 420
     title: cur ? cur.title + " — Tidings" : "Tidings"
-    color: bg
+    color: "transparent"
     font.pixelSize: 14
     onClosing: close => { close.accepted = false; hide() }
 
     palette {
-        window: bg; windowText: fg; base: raised; alternateBase: side; text: fg
+        window: solid; windowText: fg; base: raised; alternateBase: side; text: fg
         button: raised; buttonText: fg; highlight: accent; highlightedText: "white"
         placeholderText: sub; mid: line; light: raised; dark: line
     }
@@ -835,7 +838,7 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 visible: win.cur
-                backgroundColor: win.bg
+                backgroundColor: "transparent"
                 onNavigationRequested: req => {
                     if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation && !win.cur.web) {
                         Qt.openUrlExternally(req.url)

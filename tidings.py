@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import calendar, html, os, re, secrets, socket, sqlite3, subprocess, sys, threading, time, urllib.request
+import calendar, html, json, os, re, secrets, socket, sqlite3, subprocess, sys, threading, time, urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -11,10 +11,11 @@ from feedparser.sanitizer import _sanitize_html
 from jeepney import DBusAddress, HeaderFields, MatchRule, message_bus, new_method_call
 from jeepney.io.threading import DBusRouter, open_dbus_connection
 from jeepney.wrappers import unwrap_msg
-from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QAbstractListModel, QModelIndex, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QAbstractListModel, QModelIndex, QFileSystemWatcher, QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PySide6.QtWebEngineQuick import QtWebEngineQuick
 
@@ -25,12 +26,16 @@ LIMIT = 300
 KEEP_DAYS = 60
 WANTS = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'systemd/user/graphical-session.target.wants/tidings.service')
 
+THEME = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'), 'tidings/theme.json')
+PALETTE = {False: dict(bg='#ffffff', side='#f4f4f6', raised='#ffffff', fg='#1b1b20', sub='#6c6c76', line='#e6e6ea'),
+           True: dict(bg='#1c1c1f', side='#151517', raised='#2a2a2e', fg='#f2f2f4', sub='#9d9da6', line='#2b2b30')}
+
 socket.setdefaulttimeout(20)
 feedparser.USER_AGENT = UA
 
 STYLE = '''
-:root{color-scheme:light;--fg:rgba(0,0,6,.8);background:#fff}
-:root.dark{color-scheme:dark;--fg:#fff;background:#1c1c1f}
+:root{color-scheme:light;background:transparent}
+:root.dark{color-scheme:dark}
 body{font:17px/1.65 var(--font),system-ui,sans-serif;color:var(--fg);max-width:40em;margin:0 auto;padding:2.5em 1.75em 4em;overflow-wrap:break-word}
 a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:.15em}
 h1{font-size:1.75em;line-height:1.25;margin:0 0 .35em;letter-spacing:-.01em}
@@ -329,7 +334,11 @@ class Backend(QObject):
         self._feed = self.current = 0
         self._folder, self._folders = '', {}
         self._unread, self._query = False, ''
-        self._dark, self._accent = False, QColor('#3584e4')
+        self._dark, self._accent, self.custom = False, QColor('#3584e4'), {}
+        os.makedirs(os.path.dirname(THEME), exist_ok=True)
+        # watch the dir: theme generators replace the file rather than write it
+        self.watcher = QFileSystemWatcher([os.path.dirname(THEME)], self, directoryChanged=self.load_theme)
+        self.load_theme()
         self.font = f'"{QGuiApplication.font().family()}"'
         self.pending, self.note, self.fresh, self.requests = {}, 0, False, {}
         self.inflight, self.extracting, self.iconing, self.undo_ids = set(), set(), set(), []
@@ -373,6 +382,17 @@ class Backend(QObject):
             self._accent = QColor.fromRgbF(*v)
         self.themeChanged.emit()
 
+    def load_theme(self):
+        try:
+            with open(THEME) as f:
+                self.custom = json.load(f)
+        except (OSError, ValueError):
+            self.custom = {}
+        self.themeChanged.emit()
+
+    def palette(self):
+        return {**PALETTE[self._dark], 'accent': self._accent.name(), 'opacity': 0.7, **self.custom}
+
     def on_dbus(self, m):
         name, args = m.header.fields[HeaderFields.member], m.body
         if name == 'SettingChanged':
@@ -402,7 +422,7 @@ class Backend(QObject):
                 self.activate.emit(next(iter(pending)) if len(pending) == 1 else 0, ids[0] if len(ids) == 1 else 0)
 
     dark = Property(bool, lambda s: s._dark, notify=themeChanged)
-    accent = Property(QColor, lambda s: s._accent, notify=themeChanged)
+    theme = Property('QVariant', palette, notify=themeChanged)
     busy = Property(bool, lambda s: bool(s.inflight), notify=busyChanged)
     feedModel = Property(QObject, lambda s: s.feeds, constant=True)
     itemModel = Property(QObject, lambda s: s.items, constant=True)
@@ -552,7 +572,8 @@ class Backend(QObject):
             src += f'#t={int(r["pos"])}'
         player = (f'<iframe class="video" src="{src}" allowfullscreen></iframe>' if t == 'youtube'
                   else f'<{t} controls preload="metadata" src="{src}"></{t}>' if t else '')
-        return (f'<!doctype html><html class="{"dark" if self._dark else ""}" style="--accent:{self._accent.name()};'
+        t = self.palette()
+        return (f'<!doctype html><html class="{"dark" if self._dark else ""}" style="--accent:{t["accent"]};--fg:{t["fg"]};'
                 f'--font:{e(self.font)}"><meta charset="utf-8"><script>history.scrollRestoration="manual"</script><style>{STYLE}</style>'
                 f'<h1><a href="{e(r["link"] or "")}">{e(plain(r["title"]))}</a></h1><div class="meta">{e(meta)}</div>'
                 f'{player}{body}{extra}')
@@ -850,6 +871,7 @@ def main():
     os.makedirs(data, exist_ok=True)
     os.makedirs(cache, exist_ok=True)
     backend = Backend(open_db(os.path.join(data, 'tidings.db')), cache)
+    QQuickWindow.setDefaultAlphaBuffer(True)
     engine = QQmlApplicationEngine()
     engine.setInitialProperties({'app': backend, 'visible': '--background' not in sys.argv})
     engine.load(QUrl.fromLocalFile(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'Main.qml')))
