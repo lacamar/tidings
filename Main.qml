@@ -110,6 +110,7 @@ ApplicationWindow {
         property bool unreadOnly
         property bool serif
         property bool calm
+        property bool forceDark
         property int expireDays
         property alias width: win.width
         property alias height: win.height
@@ -890,6 +891,7 @@ ApplicationWindow {
                     }
                 }
                 settings.fullScreenSupportEnabled: true
+                settings.forceDarkMode: win.dark && prefs.forceDark
                 onFullScreenRequested: req => {
                     req.accept()
                     if (req.toggleOn) wasVisibility = win.visibility
@@ -948,6 +950,12 @@ ApplicationWindow {
             checkable: true
             checked: prefs.serif
             onTriggered: { prefs.serif = checked; app.setSerif(checked) }
+        }
+        Entry {
+            text: "Force Dark Web Pages"
+            checkable: true
+            checked: prefs.forceDark
+            onTriggered: prefs.forceDark = checked
         }
         Entry {
             text: "Calm Mode (Hide Counts)"

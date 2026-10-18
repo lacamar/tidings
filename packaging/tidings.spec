@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -54,6 +54,10 @@ python3 test_tidings.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.1-1
+- Follow system dark mode in web pages
+- Add forced dark mode for web pages
+
 * Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.0-1
 - Hide duplicate stories across feeds
 - Mute filters

@@ -9,6 +9,7 @@ import feedparser
 import lxml.html
 from feedparser.sanitizer import _sanitize_html
 from jeepney import DBusAddress, HeaderFields, MatchRule, message_bus, new_method_call
+from jeepney.io import blocking
 from jeepney.io.threading import DBusRouter, open_dbus_connection
 from jeepney.wrappers import unwrap_msg
 from PySide6.QtCore import Property, QDate, QDateTime, QLocale, QAbstractListModel, QModelIndex, QFileSystemWatcher, QObject, Qt, QTimer, QUrl, Signal, Slot
@@ -948,6 +949,13 @@ class Backend(QObject):
 
 def main():
     sock = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), APP_ID)
+    try:
+        with blocking.open_dbus_connection() as c:
+            if unwrap_msg(c.send_and_get_reply(new_method_call(PORTAL, 'ReadOne', 'ss', ('org.freedesktop.appearance', 'color-scheme')), timeout=2))[0][1] == 1:
+                # Chromium ignores Qt's color scheme; only read at startup
+                os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '') + ' --blink-settings=preferredColorScheme=0'
+    except Exception as e:
+        print(f'portal color-scheme: {e}', file=sys.stderr)
     QtWebEngineQuick.initialize()
     app = QApplication(sys.argv)
     peer = QLocalSocket()
