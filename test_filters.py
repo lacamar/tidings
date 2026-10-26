@@ -3,7 +3,7 @@ from tidings import open_db, store
 
 
 def feed(*entries):
-    items = ''.join(f'<item><guid>{g}</guid><title>{t}</title><link>{l}</link></item>' for g, t, l in entries)
+    items = ''.join(f'<item><guid>{g}</guid><title>{t}</title><link>{u}</link></item>' for g, t, u in entries)
     return feedparser.parse(f'<rss version="2.0"><channel><title>x</title>{items}</channel></rss>')
 
 

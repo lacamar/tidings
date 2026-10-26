@@ -1,6 +1,6 @@
 Name:           tidings
 Version:        0.2.2
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Feed reader for Linux
 
 License:        MIT
@@ -39,6 +39,7 @@ desktop-file-install --dir=%{buildroot}%{_datadir}/applications dev.lacamar.Tidi
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/dev.lacamar.Tidings.desktop
 python3 test_tidings.py
+python3 test_filters.py
 
 %files
 %license LICENSE
@@ -54,6 +55,8 @@ python3 test_tidings.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Mon Oct 26 2026 lacamar <lchlnm@pm.me> - 0.2.2-2
+- Run all tests in %%check
 * Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.2-1
 - Block ads and trackers in web viewer
 - Block third-party cookies

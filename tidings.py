@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-import calendar, html, json, os, re, secrets, signal, socket, sqlite3, subprocess, sys, threading, time, urllib.request
+import calendar
+import html
+import json
+import os
+import re
+import secrets
+import signal
+import socket
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
