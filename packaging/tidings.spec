@@ -1,6 +1,6 @@
 Name:           tidings
-Version:        0.2.2
-Release:        2%{?dist}
+Version:        0.2.3
+Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
 License:        MIT
@@ -55,6 +55,9 @@ python3 test_filters.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Mon Oct 26 2026 lacamar <lchlnm@pm.me> - 0.2.3-1
+- Lint fixes
+
 * Mon Oct 26 2026 lacamar <lchlnm@pm.me> - 0.2.2-2
 - Run all tests in %%check
 * Mon Oct 19 2026 lacamar <lchlnm@pm.me> - 0.2.2-1
