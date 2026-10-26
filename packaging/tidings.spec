@@ -86,5 +86,5 @@ python3 test_filters.py
 - Add systemd user service
 - Autostart toggle uses the service
 
-* lø. okt. 17 2026 lacamar <lchlnm@pm.me> - 0.1.0-1
+* Sat Oct 17 2026 lacamar <lchlnm@pm.me> - 0.1.0-1
 - Initial package
