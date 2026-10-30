@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.2.3
+Version:        0.2.4
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -55,6 +55,9 @@ python3 test_filters.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Fri Oct 30 2026 lacamar <lchlnm@pm.me> - 0.2.4-1
+- Reload theme on in-place rewrites
+
 * Mon Oct 26 2026 lacamar <lchlnm@pm.me> - 0.2.3-1
 - Lint fixes
 

@@ -440,8 +440,8 @@ class Backend(QObject):
         self._unread, self._query = False, ''
         self._dark, self._accent, self.custom = False, QColor('#3584e4'), {}
         os.makedirs(os.path.dirname(THEME), exist_ok=True)
-        # watch the dir: theme generators replace the file rather than write it
-        self.watcher = QFileSystemWatcher([os.path.dirname(THEME)], self, directoryChanged=self.load_theme)
+        # generators either replace the file (dir event) or rewrite it in place (file event)
+        self.watcher = QFileSystemWatcher([os.path.dirname(THEME)], self, directoryChanged=self.load_theme, fileChanged=self.load_theme)
         self.load_theme()
         self.font = f'"{QGuiApplication.font().family()}"'
         self.pending, self.note, self.fresh, self.requests = {}, 0, False, {}
@@ -493,6 +493,8 @@ class Backend(QObject):
         self.themeChanged.emit()
 
     def load_theme(self):
+        if os.path.exists(THEME) and THEME not in self.watcher.files():
+            self.watcher.addPath(THEME)
         try:
             with open(THEME) as f:
                 self.custom = json.load(f)
