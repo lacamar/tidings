@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import calendar
+import contextlib
 import html
 import json
 import os
@@ -21,7 +22,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import feedparser
 import lxml.html
 from feedparser.sanitizer import _sanitize_html
-from jeepney import DBusAddress, HeaderFields, MatchRule, message_bus, new_method_call
+from jeepney import DBusAddress, DBusErrorResponse, HeaderFields, MatchRule, message_bus, new_method_call
 from jeepney.io import blocking
 from jeepney.io.threading import DBusRouter, open_dbus_connection
 from jeepney.wrappers import unwrap_msg
@@ -918,7 +919,7 @@ class Backend(QObject):
             head, body = summary([tuple(r) for r in rows])
             self.note = self.call(NOTES, 'Notify', 'susssasa{sv}i', (
                 'Tidings', self.note, 'application-rss+xml', head, html.escape(body, quote=False),
-                ['default', 'Open', 'read', 'Mark as Read'], {'desktop-entry': ('s', APP_ID)}, -1))[0]
+                ['default', 'Open', 'read', 'Mark as Read'], {'desktop-entry': ('s', APP_ID), 'transient': ('b', True)}, -1))[0]
 
     def withdraw(self, fid, folder=''):
         gone = [r['id'] for r in self.feeds.rows if r['folder'] == folder] if folder else list(self.pending) if fid == 0 else [fid]
@@ -932,7 +933,8 @@ class Backend(QObject):
         if self.pending:
             self.notify()
         else:
-            self.call(NOTES, 'CloseNotification', 'u', (self.note,))
+            with contextlib.suppress(DBusErrorResponse):
+                self.call(NOTES, 'CloseNotification', 'u', (self.note,))
             self.note = 0
 
     @Slot(str)
