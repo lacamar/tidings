@@ -1,50 +1,49 @@
 Name:           tidings
-Version:        0.2.6
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
 License:        MIT
 URL:            https://github.com/lacamar/%{name}
 Source0:        %{name}-%{version}.tar.gz
+Source1:        %{name}-%{version}-vendor.tar.gz
 
-BuildArch:      noarch
+%global debug_package %{nil}
+
+BuildRequires:  cargo
+BuildRequires:  rust
+BuildRequires:  gcc-c++
+BuildRequires:  qt6-qtbase-devel
+BuildRequires:  qt6-qtdeclarative-devel
+BuildRequires:  qt6-qtwebengine-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  systemd-rpm-macros
-BuildRequires:  python3
-BuildRequires:  python3-feedparser
-BuildRequires:  python3-jeepney
-BuildRequires:  python3-lxml
-BuildRequires:  python3-pyside6
-Requires:       python3-feedparser
-Requires:       python3-jeepney
-Requires:       python3-lxml
-Requires:       python3-pyside6
+Requires:       qt6-qtdeclarative
+Requires:       qt6-qtwebengine
 
 %description
 RSS and Atom reader built with Qt Quick.
 
 %prep
-%autosetup
+%autosetup -a1
+mkdir -p .cargo
+printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "vendor"\n' > .cargo/config.toml
 
 %build
+cargo build --release --offline --locked
 
 %install
-install -Dm755 tidings.py %{buildroot}%{_datadir}/%{name}/tidings.py
-install -Dm644 Main.qml %{buildroot}%{_datadir}/%{name}/Main.qml
-mkdir -p %{buildroot}%{_bindir}
-ln -s ../share/%{name}/tidings.py %{buildroot}%{_bindir}/%{name}
+install -Dm755 target/release/%{name} %{buildroot}%{_bindir}/%{name}
 install -Dm644 tidings.service %{buildroot}%{_userunitdir}/tidings.service
 desktop-file-install --dir=%{buildroot}%{_datadir}/applications dev.lacamar.Tidings.desktop
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/dev.lacamar.Tidings.desktop
-python3 test_tidings.py
-python3 test_filters.py
+cargo test --release --offline --locked
 
 %files
 %license LICENSE
 %{_bindir}/%{name}
-%{_datadir}/%{name}/
 %{_datadir}/applications/dev.lacamar.Tidings.desktop
 %{_userunitdir}/tidings.service
 
@@ -55,6 +54,10 @@ python3 test_filters.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.3.0-1
+- Rewrite in Rust (cxx-qt)
+- Drop Python dependencies
+
 * Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.2.6-1
 - Fix overlapping article rows after refresh
 

@@ -1,4 +1,3 @@
-__pycache__/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
@@ -6,8 +5,7 @@ __pycache__/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
-.pytest_cache/
-.ruff_cache/
 build/
 dist/
 node_modules/
+/target

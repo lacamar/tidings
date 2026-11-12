@@ -1,11 +1,11 @@
 default: run
 
 run:
-    python3 tidings.py
+    cargo run --release
 
 test:
-    python3 test_tidings.py
-    python3 test_filters.py
+    cargo test
 
 lint:
-    ruff check .
+    cargo clippy --all-targets
+    cargo fmt --check
