@@ -191,6 +191,43 @@ ApplicationWindow {
                                    && !renameDialog.visible && !removeDialog.visible && !helpDialog.visible && !folderDialog.visible && !muteDialog.visible
     }
 
+    component SmoothWheel: WheelHandler {
+        id: wh
+        readonly property Flickable view: parent
+        property real speed: 2.5
+        property real vel: 0
+        property real last: 0
+        target: null
+        function clamp(y) {
+            return Math.max(view.originY - view.topMargin,
+                            Math.min(y, view.originY + view.contentHeight + view.bottomMargin - view.height))
+        }
+        onWheel: ev => {
+            if (ev.pixelDelta.y !== 0 || ev.phase !== Qt.NoScrollPhase) {
+                anim.stop()
+                const now = Date.now(), d = ev.pixelDelta.y * speed
+                if (ev.phase === Qt.ScrollEnd) {
+                    // libinput has no kinetic scrolling; fling on lift
+                    if (now - last < 80 && Math.abs(vel) > 200) view.flick(0, vel)
+                    vel = 0
+                } else if (d !== 0) {
+                    view.cancelFlick()
+                    const dt = Math.max(1, now - last)
+                    vel = 0.6 * vel + 0.4 * (d * 1000 / Math.min(dt, 50))
+                    view.contentY = clamp(view.contentY - d)
+                }
+                last = now
+            } else {
+                const from = anim.running ? anim.to : view.contentY
+                anim.to = clamp(from - ev.angleDelta.y / 120 * 120)
+                anim.restart()
+            }
+        }
+        property NumberAnimation anim: NumberAnimation {
+            target: wh.view; property: "contentY"; duration: 220; easing.type: Easing.OutCubic
+        }
+    }
+
     component IconButton: ToolButton {
         property string tip
         icon.width: 18
@@ -413,6 +450,7 @@ ApplicationWindow {
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
+                    SmoothWheel {}
                     section.property: "folder"
                     section.delegate: Item {
                         id: head
@@ -616,6 +654,7 @@ ApplicationWindow {
                     reuseItems: true
                     onAtYEndChanged: if (atYEnd && count) app.more()
                     ScrollBar.vertical: ScrollBar {}
+                    SmoothWheel {}
                     add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 220 } }
                     section.property: "day"
                     section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
