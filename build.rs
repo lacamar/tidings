@@ -1,6 +1,7 @@
 use cxx_qt_build::CxxQtBuilder;
 
 fn main() {
+    println!("cargo::rerun-if-changed=Main.qml");
     CxxQtBuilder::new()
         .files(["src/bridge.rs", "src/shim.rs"])
         .qrc_resources(["Main.qml"])

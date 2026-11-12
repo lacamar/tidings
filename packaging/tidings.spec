@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -54,6 +54,9 @@ cargo test --release --offline --locked
 %systemd_user_preun tidings.service
 
 %changelog
+* Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.3.1-1
+- Fix startup failure from duplicate bg property
+
 * Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.3.0-1
 - Rewrite in Rust (cxx-qt)
 - Drop Python dependencies

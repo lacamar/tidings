@@ -10,14 +10,14 @@ ApplicationWindow {
     required property var app
     property var cur: null
     property WebEngineView reader: viewA
-    property WebEngineView bg: null
+    property WebEngineView parked: null
     function park() {
         if (!reader.recentlyAudible) return
-        if (bg) bg.loadHtml("")
-        bg = reader
+        if (parked) parked.loadHtml("")
+        parked = reader
         reader = reader === viewA ? viewB : viewA
     }
-    function stopBg() { if (bg) bg.loadHtml(""); bg = null }
+    function stopParked() { if (parked) parked.loadHtml(""); parked = null }
     property bool sideWanted: true
     readonly property bool showSide: sideWanted && width >= 760
     readonly property bool dark: app.dark
@@ -46,12 +46,12 @@ ApplicationWindow {
     function openItem(r) {
         if (!r) return
         itemsView.positionViewAtIndex(r.index, ListView.Contain)
-        if (bg && bg.item.id === r.id) {
+        if (parked && parked.item.id === r.id) {
             const old = reader
-            reader = bg
-            bg = null
+            reader = parked
+            parked = null
             cur = r
-            if (old.recentlyAudible) bg = old
+            if (old.recentlyAudible) parked = old
             else old.loadHtml("")
             return
         }
@@ -830,28 +830,28 @@ ApplicationWindow {
                     onClicked: app.showHidden = !app.showHidden
                 }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: win.line; visible: !!win.bg }
+                Rectangle { Layout.fillWidth: true; height: 1; color: win.line; visible: !!win.parked }
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 48
                     Layout.leftMargin: 8
                     Layout.rightMargin: 8
-                    visible: !!win.bg
+                    visible: !!win.parked
                     spacing: 4
                     IconButton {
                         tip: "Play / Pause"
-                        icon.name: win.bg && win.bg.recentlyAudible ? "media-playback-pause" : "media-playback-start"
-                        onClicked: win.bg.runJavaScript("(m => m && (m.paused ? m.play() : m.pause()))(document.querySelector('audio,video'))")
+                        icon.name: win.parked && win.parked.recentlyAudible ? "media-playback-pause" : "media-playback-start"
+                        onClicked: win.parked.runJavaScript("(m => m && (m.paused ? m.play() : m.pause()))(document.querySelector('audio,video'))")
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: win.bg ? win.bg.item.title : ""
+                        text: win.parked ? win.parked.item.title : ""
                         elide: Text.ElideRight
                         font.pixelSize: 13
-                        TapHandler { onTapped: win.openItem(app.neighbor(win.bg.item.id, 0) || win.bg.item) }
+                        TapHandler { onTapped: win.openItem(app.neighbor(win.parked.item.id, 0) || win.parked.item) }
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                     }
-                    IconButton { tip: "Stop"; icon.name: "window-close-symbolic"; onClicked: win.stopBg() }
+                    IconButton { tip: "Stop"; icon.name: "window-close-symbolic"; onClicked: win.stopParked() }
                 }
             }
         }
