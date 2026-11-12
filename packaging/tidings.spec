@@ -58,6 +58,7 @@ cargo test --release --offline --locked
 - Rewrite in Rust (cxx-qt)
 - Drop Python dependencies
 - Smooth wheel scrolling, faster touchpad scrolling with fling
+- Keep audio/video playing in background with mini player
 
 * Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.2.6-1
 - Fix overlapping article rows after refresh

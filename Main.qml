@@ -9,6 +9,15 @@ ApplicationWindow {
     id: win
     required property var app
     property var cur: null
+    property WebEngineView reader: viewA
+    property WebEngineView bg: null
+    function park() {
+        if (!reader.recentlyAudible) return
+        if (bg) bg.loadHtml("")
+        bg = reader
+        reader = reader === viewA ? viewB : viewA
+    }
+    function stopBg() { if (bg) bg.loadHtml(""); bg = null }
     property bool sideWanted: true
     readonly property bool showSide: sideWanted && width >= 760
     readonly property bool dark: app.dark
@@ -36,8 +45,19 @@ ApplicationWindow {
     function base(link) { return /youtube\.com\//.test(link) ? "https://tidings.lacamar.dev/" : link }
     function openItem(r) {
         if (!r) return
-        cur = r
         itemsView.positionViewAtIndex(r.index, ListView.Contain)
+        if (bg && bg.item.id === r.id) {
+            const old = reader
+            reader = bg
+            bg = null
+            cur = r
+            if (old.recentlyAudible) bg = old
+            else old.loadHtml("")
+            return
+        }
+        if (cur && cur.id !== r.id) park()
+        cur = r
+        reader.item = r
         const page = app.article(r.id)
         if (r.web) reader.url = r.link
         else reader.loadHtml(page, base(r.link))
@@ -52,8 +72,8 @@ ApplicationWindow {
         openItem(app.nextUnread(-1))
     }
     property bool full
-    function selectFeed(fid) { app.feedId = fid; cur = null; reader.loadHtml("") }
-    function selectFolder(name) { app.folder = name; cur = null; reader.loadHtml("") }
+    function selectFeed(fid) { app.feedId = fid; cur = null; park(); reader.loadHtml("") }
+    function selectFolder(name) { app.folder = name; cur = null; park(); reader.loadHtml("") }
     function shut(name) { return prefs.collapsed.split("\n").indexOf(name) >= 0 }
     function toggleShut(name) {
         const l = prefs.collapsed ? prefs.collapsed.split("\n") : []
@@ -115,7 +135,7 @@ ApplicationWindow {
         property alias width: win.width
         property alias height: win.height
         property alias sideWanted: win.sideWanted
-        property alias zoom: reader.zoomFactor
+        property real zoom: 1
     }
 
     Component.onCompleted: {
@@ -172,9 +192,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Q"; onActivated: Qt.quit() }
     Shortcut { sequence: "Ctrl+W"; onActivated: win.hide() }
     Shortcut { sequence: "Ctrl+Shift+A"; onActivated: app.markAllRead(app.feedId, app.folder) }
-    Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: reader.zoomFactor = Math.min(3, reader.zoomFactor + 0.1) }
-    Shortcut { sequence: "Ctrl+-"; onActivated: reader.zoomFactor = Math.max(0.5, reader.zoomFactor - 0.1) }
-    Shortcut { sequence: "Ctrl+0"; onActivated: reader.zoomFactor = 1 }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: prefs.zoom = Math.min(3, prefs.zoom + 0.1) }
+    Shortcut { sequence: "Ctrl+-"; onActivated: prefs.zoom = Math.max(0.5, prefs.zoom - 0.1) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: prefs.zoom = 1 }
     Shortcut { sequence: "J"; enabled: keys.ok; onActivated: win.step(1) }
     Shortcut { sequence: "K"; enabled: keys.ok; onActivated: win.step(-1) }
     Shortcut { sequence: "Space"; enabled: keys.ok; onActivated: win.page(true) }
@@ -809,6 +829,30 @@ ApplicationWindow {
                     }
                     onClicked: app.showHidden = !app.showHidden
                 }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: win.line; visible: !!win.bg }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 48
+                    Layout.leftMargin: 8
+                    Layout.rightMargin: 8
+                    visible: !!win.bg
+                    spacing: 4
+                    IconButton {
+                        tip: "Play / Pause"
+                        icon.name: win.bg && win.bg.recentlyAudible ? "media-playback-pause" : "media-playback-start"
+                        onClicked: win.bg.runJavaScript("(m => m && (m.paused ? m.play() : m.pause()))(document.querySelector('audio,video'))")
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: win.bg ? win.bg.item.title : ""
+                        elide: Text.ElideRight
+                        font.pixelSize: 13
+                        TapHandler { onTapped: win.openItem(app.neighbor(win.bg.item.id, 0) || win.bg.item) }
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                    }
+                    IconButton { tip: "Stop"; icon.name: "window-close-symbolic"; onClicked: win.stopBg() }
+                }
             }
         }
 
@@ -893,57 +937,16 @@ ApplicationWindow {
                 z: 1
             }
 
-            WebEngineView {
-                id: reader
-                anchors.top: readerBar.bottom
-                anchors.bottom: parent.bottom
-                width: parent.width
-                visible: win.cur
-                backgroundColor: "transparent"
-                onNavigationRequested: req => {
-                    if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation && !win.cur.web) {
-                        Qt.openUrlExternally(req.url)
-                        req.reject()
-                    }
-                }
-                onNewWindowRequested: req => Qt.openUrlExternally(req.requestedUrl)
-                onLoadingChanged: info => { if (info.status === WebEngineView.LoadSucceededStatus && app.query) findText(app.query) }
-                Timer {
-                    interval: 5000
-                    repeat: true
-                    running: win.cur && !win.cur.web && (win.cur.media === "audio" || win.cur.media === "video")
-                    onTriggered: {
-                        const id = win.cur.id
-                        reader.runJavaScript("(m => !m ? -1 : m.ended ? 0 : m.paused ? -1 : m.currentTime)(document.querySelector('audio,video'))",
-                                             t => { if (t >= 0) app.setPos(id, t) })
-                    }
-                }
-                Connections {
-                    target: reader.profile
-                    function onDownloadRequested(d) {
-                        d.accept()
-                        d.stateChanged.connect(() => {
-                            if (d.state === WebEngineDownloadRequest.DownloadCompleted) toast.say(`Saved ${d.downloadFileName} to Downloads`, false)
-                            else if (d.state === WebEngineDownloadRequest.DownloadInterrupted) toast.say("Download failed", false)
-                        })
-                    }
-                }
-                settings.fullScreenSupportEnabled: true
-                settings.forceDarkMode: win.dark && prefs.forceDark
-                userScripts.collection: app.cosmetic ? [{ name: "cosmetic", sourceCode: app.cosmetic, injectionPoint: WebEngineScript.DocumentCreation, worldId: WebEngineScript.ApplicationWorld }] : []
-                onFullScreenRequested: req => {
-                    req.accept()
-                    if (req.toggleOn) wasVisibility = win.visibility
-                    win.full = req.toggleOn
-                    win.visibility = req.toggleOn ? Window.FullScreen : wasVisibility
-                }
-                property int wasVisibility
-                onLinkHovered: url => hoverUrl.text = url
-                onContextMenuRequested: req => {
-                    req.accepted = true
-                    readerMenu.at = { text: req.selectedText, link: req.linkUrl.toString(),
-                                      image: req.mediaType === ContextMenuRequest.MediaTypeImage ? req.mediaUrl.toString() : "" }
-                    readerMenu.popup()
+            Reader { id: viewA; anchors.top: readerBar.bottom; anchors.bottom: parent.bottom; width: parent.width }
+            Reader { id: viewB; anchors.top: readerBar.bottom; anchors.bottom: parent.bottom; width: parent.width }
+            Connections {
+                target: viewA.profile
+                function onDownloadRequested(d) {
+                    d.accept()
+                    d.stateChanged.connect(() => {
+                        if (d.state === WebEngineDownloadRequest.DownloadCompleted) toast.say(`Saved ${d.downloadFileName} to Downloads`, false)
+                        else if (d.state === WebEngineDownloadRequest.DownloadInterrupted) toast.say("Download failed", false)
+                    })
                 }
             }
 
@@ -1100,6 +1103,49 @@ ApplicationWindow {
         Sep {}
         Entry { text: "Open in Browser"; enabled: !!itemMenu.item.link; onTriggered: Qt.openUrlExternally(itemMenu.item.link) }
         Entry { text: "Copy Link"; enabled: !!itemMenu.item.link; onTriggered: app.copy(itemMenu.item.link) }
+    }
+
+    component Reader: WebEngineView {
+        id: view
+        property var item: null
+        visible: win.cur && win.reader === view
+        zoomFactor: prefs.zoom
+        backgroundColor: "transparent"
+        onNavigationRequested: req => {
+            if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation && !view.item.web) {
+                Qt.openUrlExternally(req.url)
+                req.reject()
+            }
+        }
+        onNewWindowRequested: req => Qt.openUrlExternally(req.requestedUrl)
+        onLoadingChanged: info => { if (info.status === WebEngineView.LoadSucceededStatus && app.query) view.findText(app.query) }
+        Timer {
+            interval: 5000
+            repeat: true
+            running: !!view.item && !view.item.web && (view.item.media === "audio" || view.item.media === "video")
+            onTriggered: {
+                const id = view.item.id
+                view.runJavaScript("(m => !m ? -1 : m.ended ? 0 : m.paused ? -1 : m.currentTime)(document.querySelector('audio,video'))",
+                                     t => { if (t >= 0) app.setPos(id, t) })
+            }
+        }
+        settings.fullScreenSupportEnabled: true
+        settings.forceDarkMode: win.dark && prefs.forceDark
+        userScripts.collection: app.cosmetic ? [{ name: "cosmetic", sourceCode: app.cosmetic, injectionPoint: WebEngineScript.DocumentCreation, worldId: WebEngineScript.ApplicationWorld }] : []
+        onFullScreenRequested: req => {
+            req.accept()
+            if (req.toggleOn) wasVisibility = win.visibility
+            win.full = req.toggleOn
+            win.visibility = req.toggleOn ? Window.FullScreen : wasVisibility
+        }
+        property int wasVisibility
+        onLinkHovered: url => { if (visible) hoverUrl.text = url }
+        onContextMenuRequested: req => {
+            req.accepted = true
+            readerMenu.at = { text: req.selectedText, link: req.linkUrl.toString(),
+                              image: req.mediaType === ContextMenuRequest.MediaTypeImage ? req.mediaUrl.toString() : "" }
+            readerMenu.popup()
+        }
     }
 
     component Sheet: Popup {
