@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.2.5
+Version:        0.2.6
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -55,6 +55,9 @@ python3 test_filters.py
 %systemd_user_preun tidings.service
 
 %changelog
+* Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.2.6-1
+- Fix overlapping article rows after refresh
+
 * Mon Nov 02 2026 lacamar <lchlnm@pm.me> - 0.2.5-1
 - Send notifications as transient
 - Ignore close errors for stale notifications

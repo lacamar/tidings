@@ -617,7 +617,6 @@ ApplicationWindow {
                     onAtYEndChanged: if (atYEnd && count) app.more()
                     ScrollBar.vertical: ScrollBar {}
                     add: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 220 } }
-                    displaced: Transition { NumberAnimation { property: "y"; duration: 220; easing.type: Easing.OutCubic } }
                     section.property: "day"
                     section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
                     section.delegate: Rectangle {
