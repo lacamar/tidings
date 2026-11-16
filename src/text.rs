@@ -78,18 +78,24 @@ pub fn summary(rows: &[(String, String)]) -> (String, String) {
     } else {
         format!("{n} new articles")
     };
-    let body = rows
-        .iter()
-        .take(3)
-        .map(|(t, f)| {
-            if one_feed {
-                plain(t)
-            } else {
-                format!("{f}: {}", plain(t))
+    let body = if n == 1 {
+        plain(&rows[0].0)
+    } else if one_feed {
+        String::new()
+    } else {
+        let mut feeds: Vec<&str> = Vec::new();
+        for (_, f) in rows {
+            if !feeds.contains(&f.as_str()) {
+                feeds.push(f);
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+        }
+        let more = feeds.len().saturating_sub(2);
+        let mut b = feeds[..feeds.len().min(2)].join(" · ");
+        if more > 0 {
+            b += &format!(" · +{more} more");
+        }
+        b
+    };
     (head, body)
 }
 
@@ -203,11 +209,15 @@ mod tests {
         assert_eq!(summary(&[r("<b>A</b>", "F")]), ("F".into(), "A".into()));
         assert_eq!(
             summary(&[r("A", "F"), r("B", "F")]),
-            ("2 new from F".into(), "A\nB".into())
+            ("2 new from F".into(), String::new())
         );
         assert_eq!(
             summary(&[r("A", "F"), r("B", "G"), r("C", "G"), r("D", "G")]),
-            ("4 new articles".into(), "F: A\nG: B\nG: C".into())
+            ("4 new articles".into(), "F · G".into())
+        );
+        assert_eq!(
+            summary(&[r("A", "F"), r("B", "G"), r("C", "H"), r("D", "I")]),
+            ("4 new articles".into(), "F · G · +2 more".into())
         );
     }
 

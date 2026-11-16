@@ -1,5 +1,5 @@
 Name:           tidings
-Version:        0.3.1
+Version:        0.3.2
 Release:        1%{?dist}
 Summary:        Feed reader for Linux
 
@@ -54,6 +54,9 @@ cargo test --release --offline --locked
 %systemd_user_preun tidings.service
 
 %changelog
+* Mon Nov 16 2026 lacamar <lchlnm@pm.me> - 0.3.2-1
+- Shorter notification body: feed names, no title list
+
 * Thu Nov 12 2026 lacamar <lchlnm@pm.me> - 0.3.1-1
 - Fix startup failure from duplicate bg property
 
